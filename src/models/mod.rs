@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use crate::errors::AppError;
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize, PartialEq)]
 pub enum PaymentStatus {
     Paid,
     Pending,
@@ -20,6 +20,7 @@ pub struct Student {
     pub email: String,
     pub status: PaymentStatus,
     pub department: String,
+    pub payment_reference: Option<String>, // tracks Paystack transaction ref
 }
 
 #[derive(Deserialize)]
@@ -50,6 +51,7 @@ impl AppStore {
             email: student.email,
             department: student.department,
             status: PaymentStatus::Pending,
+            payment_reference: None,
         };
 
         self.students
@@ -72,6 +74,32 @@ impl AppStore {
     pub async fn get_student(&self, id: Uuid) -> Result<Student, AppError> {
         if let Some(student) = self.students.lock().await.get(&id.to_string()) {
             Ok(student.clone())
+        } else {
+            Err(AppError::NotFound)
+        }
+    }
+
+    // Save the Paystack reference against the student after initializing payment
+    pub async fn set_payment_reference(&self, id: Uuid, reference: String) -> Result<(), AppError> {
+        let mut store = self.students.lock().await;
+        if let Some(student) = store.get_mut(&id.to_string()) {
+            student.payment_reference = Some(reference);
+            Ok(())
+        } else {
+            Err(AppError::NotFound)
+        }
+    }
+
+    // Called from the webhook handler to mark student as Paid
+    pub async fn mark_student_paid_by_reference(&self, reference: &str) -> Result<(), AppError> {
+        let mut store = self.students.lock().await;
+        let student = store
+            .values_mut()
+            .find(|s| s.payment_reference.as_deref() == Some(reference));
+
+        if let Some(student) = student {
+            student.status = PaymentStatus::Paid;
+            Ok(())
         } else {
             Err(AppError::NotFound)
         }

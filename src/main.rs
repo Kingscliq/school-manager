@@ -4,6 +4,7 @@ mod handlers;
 mod logger;
 mod models;
 mod routes;
+mod services;
 
 use std::net::{Ipv6Addr, SocketAddr};
 
