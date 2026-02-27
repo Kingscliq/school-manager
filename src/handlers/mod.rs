@@ -31,6 +31,8 @@ pub async fn create_student_handler(
     Json(req): Json<CreateStudentRequest>,
 ) -> impl IntoResponse {
     let payload = CreateStudentRequest {
+        user_id: req.user_id,
+        school_id: req.school_id,
         first_name: match trim_required(&req.first_name, "first_name") {
             Ok(value) => value,
             Err(err) => return err.into_response(),
@@ -112,15 +114,28 @@ pub async fn initiate_payment_handler(
         .await
     {
         Ok(data) => {
-            // Store the reference so the webhook can find this student later
-            let _ = app_store
-                .set_payment_reference(id, data.reference.clone())
-                .await;
+            let payment = match app_store
+                .create_pending_payment(id, data.reference.clone(), amount_kobo)
+                .await
+            {
+                Ok(payment) => payment,
+                Err(e) => {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(e.to_string()),
+                    )
+                        .into_response();
+                }
+            };
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
                     "authorization_url": data.authorization_url,
                     "reference": data.reference,
+                    "payment_id": payment.id,
+                    "student_id": payment.student_id,
+                    "user_id": payment.user_id,
+                    "school_id": payment.school_id,
                 })),
             )
                 .into_response()
@@ -168,7 +183,7 @@ pub async fn paystack_webhook_handler(
     // Only handle successful charge events
     if event["event"] == "charge.success" {
         if let Some(reference) = event["data"]["reference"].as_str() {
-            let _ = app_store.mark_student_paid_by_reference(reference).await;
+            let _ = app_store.mark_payment_paid_by_reference(reference).await;
         }
     }
 
