@@ -12,4 +12,6 @@ pub enum AppError {
     MissingEnvironmentVarible(String),
     #[error("Failed to Parse: {0}")]
     ParsingError(String),
+    #[error("You dont have permission to perform this action: {0}")]
+    UnAuthorized(String),
 }

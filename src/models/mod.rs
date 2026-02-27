@@ -4,6 +4,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use chrono::Utc;
+
+use crate::auth::models::{CreateSchoolRequest, School, User};
 use crate::errors::AppError;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
@@ -34,12 +37,16 @@ pub struct CreateStudentRequest {
 #[derive(Clone)]
 pub struct AppStore {
     pub students: Arc<Mutex<HashMap<String, Student>>>,
+    pub users: Arc<Mutex<HashMap<String, User>>>,
+    pub schools: Arc<Mutex<HashMap<String, School>>>,
 }
 
 impl AppStore {
     pub fn new() -> Self {
         Self {
             students: Arc::new(Mutex::new(HashMap::new())),
+            users: Arc::new(Mutex::new(HashMap::new())),
+            schools: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -104,4 +111,86 @@ impl AppStore {
             Err(AppError::NotFound)
         }
     }
+
+    pub async fn create_user(&self, user: User) -> Result<User, AppError> {
+        let mut users = self.users.lock().await;
+        let email_key = user.email.to_lowercase();
+        if users.contains_key(&email_key) {
+            return Err(AppError::UnProcessableEntity {
+                field: "email".to_string(),
+                message: "Email already exists".to_string(),
+            });
+        }
+        users.insert(email_key, user.clone());
+        Ok(user)
+    }
+
+    pub async fn find_user_by_email(&self, email: &str) -> Option<User> {
+        let users = self.users.lock().await;
+        users.get(&email.to_lowercase()).cloned()
+    }
+
+    pub async fn find_user_by_id(&self, id: Uuid) -> Option<User> {
+        let users = self.users.lock().await;
+        users.values().find(|u| u.id == id).cloned()
+    }
+
+    pub async fn get_all_users(&self) -> Vec<User> {
+        let users = self.users.lock().await;
+        users.values().cloned().collect()
+    }
+
+    pub async fn create_school(
+        &self,
+        req: CreateSchoolRequest,
+    ) -> Result<School, AppError> {
+        let mut schools = self.schools.lock().await;
+        let slug = slugify(&req.name);
+        if slug.is_empty() {
+            return Err(AppError::UnProcessableEntity {
+                field: "name".to_string(),
+                message: "School name is invalid".to_string(),
+            });
+        }
+
+        if schools.values().any(|school| school.slug == slug) {
+            return Err(AppError::UnProcessableEntity {
+                field: "name".to_string(),
+                message: "School already exists".to_string(),
+            });
+        }
+
+        let school = School {
+            id: Uuid::new_v4(),
+            name: req.name,
+            slug: slug.clone(),
+            is_active: true,
+            created_at: Utc::now().timestamp(),
+        };
+        schools.insert(school.id.to_string(), school.clone());
+        Ok(school)
+    }
+
+    pub async fn school_exists(&self, id: Uuid) -> bool {
+        let schools = self.schools.lock().await;
+        schools.contains_key(&id.to_string())
+    }
+
+    pub async fn get_all_schools(&self) -> Vec<School> {
+        let schools = self.schools.lock().await;
+        schools.values().cloned().collect()
+    }
+}
+
+fn slugify(value: &str) -> String {
+    value
+        .trim()
+        .to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
 }

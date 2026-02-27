@@ -4,6 +4,7 @@ use axum::{
 };
 
 use crate::{
+    auth::routes::auth_routes,
     handlers::{
         create_student_handler, delete_student_handler, get_all_students_handler,
         get_student_handler, initiate_payment_handler, paystack_webhook_handler,
@@ -14,6 +15,7 @@ use crate::{
 pub fn create_router(store: AppStore) -> Router {
     Router::new()
         .route("/", get(|| async { "Hello from Axum! 🦀" }))
+        .nest("/auth", auth_routes(store.clone()))
         .route(
             "/student",
             post(create_student_handler).get(get_all_students_handler),

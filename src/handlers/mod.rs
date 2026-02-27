@@ -15,12 +15,46 @@ use crate::{
     services::initialize_paystack_transaction,
 };
 
+fn trim_required(value: &str, field: &str) -> Result<String, (StatusCode, Json<String>)> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err((
+            StatusCode::UNPROCESSABLE_ENTITY,
+            Json(format!("{field} cannot be empty")),
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
 pub async fn create_student_handler(
     State(app_store): State<AppStore>,
     Json(req): Json<CreateStudentRequest>,
 ) -> impl IntoResponse {
-    match app_store.create_student(req).await {
-        Ok(()) => (StatusCode::CREATED, Json("Student created successfully".to_string())).into_response(),
+    let payload = CreateStudentRequest {
+        first_name: match trim_required(&req.first_name, "first_name") {
+            Ok(value) => value,
+            Err(err) => return err.into_response(),
+        },
+        last_name: match trim_required(&req.last_name, "last_name") {
+            Ok(value) => value,
+            Err(err) => return err.into_response(),
+        },
+        email: match trim_required(&req.email, "email") {
+            Ok(value) => value,
+            Err(err) => return err.into_response(),
+        },
+        department: match trim_required(&req.department, "department") {
+            Ok(value) => value,
+            Err(err) => return err.into_response(),
+        },
+    };
+
+    match app_store.create_student(payload).await {
+        Ok(()) => (
+            StatusCode::CREATED,
+            Json("Student created successfully".to_string()),
+        )
+            .into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(err.to_string())).into_response(),
     }
 }
@@ -69,17 +103,27 @@ pub async fn initiate_payment_handler(
 
     // Generate a unique reference for this transaction
     let reference = format!("sch-{}", Uuid::new_v4());
-    // Amount in kobo — adjust this to your school fees amount
-    let amount_kobo: u64 = 500_000; // NGN 5,000
 
-    match initialize_paystack_transaction(&secret_key, &student.email, amount_kobo, &reference).await {
+    // TODO: we are not supposed to hadcode amount so this endpoint should be able to get amount from the body of the request
+    // Amount in kobo — adjust this to your school fees amount
+    let amount_kobo: u64 = 500_000; // NGN 5,000 
+
+    match initialize_paystack_transaction(&secret_key, &student.email, amount_kobo, &reference)
+        .await
+    {
         Ok(data) => {
             // Store the reference so the webhook can find this student later
-            let _ = app_store.set_payment_reference(id, data.reference.clone()).await;
-            (StatusCode::OK, Json(serde_json::json!({
-                "authorization_url": data.authorization_url,
-                "reference": data.reference,
-            }))).into_response()
+            let _ = app_store
+                .set_payment_reference(id, data.reference.clone())
+                .await;
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "authorization_url": data.authorization_url,
+                    "reference": data.reference,
+                })),
+            )
+                .into_response()
         }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, Json(e.to_string())).into_response(),
     }
@@ -97,7 +141,10 @@ pub async fn paystack_webhook_handler(
     };
 
     // Verify the webhook signature using HMAC-SHA512
-    let signature = match headers.get("x-paystack-signature").and_then(|v| v.to_str().ok()) {
+    let signature = match headers
+        .get("x-paystack-signature")
+        .and_then(|v| v.to_str().ok())
+    {
         Some(sig) => sig.to_string(),
         None => return StatusCode::UNAUTHORIZED,
     };
@@ -105,6 +152,7 @@ pub async fn paystack_webhook_handler(
     let mut mac = Hmac::<Sha512>::new_from_slice(secret_key.as_bytes())
         .expect("HMAC can take key of any size");
     mac.update(&body);
+
     let expected = hex::encode(mac.finalize().into_bytes());
 
     if expected != signature {
@@ -127,4 +175,3 @@ pub async fn paystack_webhook_handler(
     // Always return 200 so Paystack stops retrying
     StatusCode::OK
 }
-

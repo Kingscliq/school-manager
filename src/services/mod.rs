@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use crate::errors::AppError;
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize)]
 struct InitializePaymentBody {
@@ -26,6 +26,7 @@ pub async fn initialize_paystack_transaction(
     amount_kobo: u64,
     reference: &str,
 ) -> Result<PaystackInitData, AppError> {
+    
     let client = reqwest::Client::new();
 
     let body = InitializePaymentBody {
@@ -35,7 +36,7 @@ pub async fn initialize_paystack_transaction(
     };
 
     let response = client
-        .post("https://api.paystack.co/transaction/initialize")
+        .post("https://api.paystack.co/transaction/initialize") // this should be moved to env, the payment url
         .header("Authorization", format!("Bearer {}", secret_key))
         .json(&body)
         .send()
